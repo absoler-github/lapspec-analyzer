@@ -35,10 +35,10 @@
 - **マイクの向き**:
   ノートPCのマイク位置（ベゼルの上やキーボード付近）を音源に向けて設置してください。
 
-/* ## 開発者向け (For Developers)
+<!-- ## 開発者向け (For Developers)
 
 - **技術スタック**: HTML5 / JavaScript (Web Audio API) / Canvas API
-- **物理演算**: `updatePeakPhysics` 関数にて、極めて微小な `Kp`（比例定数）と `Kd`（微分定数）を用いたPD制御を行い、独自の減衰感を作っています。 */
+- **物理演算**: `updatePeakPhysics` 関数にて、極めて微小な `Kp`（比例定数）と `Kd`（微分定数）を用いたPD制御を行い、独自の減衰感を作っています。 -->
 
 ## ライセンス (License)
 
