@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ブラウザオシロスコープ＆スペクトルアナライザー</title>
+    <title>LapSpec Analyzer - Professional Edition</title>
     <style>
       body {
         display: flex;
@@ -16,541 +16,280 @@
         color: #eee;
         font-family: sans-serif;
       }
-
-      h1 {
-        color: #4caf50; /* 緑系のタイトル */
-      }
-
+      h1 { color: #4caf50; margin: 10px 0; }
       canvas {
-        border: 2px solid #4caf50; /* 緑系の枠線 */
+        border: 2px solid #4caf50;
         background-color: #000;
         display: block;
-        margin-top: 10px; /* キャンバス間の間隔を調整 */
+        margin-top: 5px;
       }
-
       .controls {
-        margin-top: 20px;
+        margin-top: 15px;
         display: flex;
-        flex-wrap: wrap; /* 小さい画面で折り返す */
+        flex-wrap: wrap;
         gap: 15px;
         align-items: center;
-        justify-content: center; /* 中央寄せ */
+        justify-content: center;
+        max-width: 1000px;
+        padding: 10px;
       }
-
       .control-group {
         display: flex;
         align-items: center;
-        gap: 5px;
+        gap: 8px;
+        border: 1px solid #444;
+        padding: 5px 12px;
+        border-radius: 5px;
+        background: #333;
       }
-
+      label { font-size: 12px; color: #aaa; }
+      .val-disp { font-family: monospace; min-width: 30px; text-align: right; color: #4caf50; }
       button {
-        padding: 10px 20px;
-        font-size: 16px;
+        padding: 8px 16px;
         cursor: pointer;
         border: none;
-        border-radius: 5px;
+        border-radius: 4px;
         background-color: #4caf50;
         color: white;
-        transition: background-color 0.3s ease;
+        font-weight: bold;
       }
-
-      button:hover {
-        background-color: #45a049;
-      }
-
-      button:disabled {
-        background-color: #555;
-        cursor: not-allowed;
-      }
-
-      label {
-        margin-right: 5px;
-      }
-
-      input[type="range"] {
-        width: 150px;
-        -webkit-appearance: none;
-        height: 8px;
-        background: #555;
-        border-radius: 5px;
-        outline: none;
-        opacity: 0.7;
-        transition: opacity 0.2s;
-      }
-
-      input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
-        background: #4caf50;
-        cursor: pointer;
-      }
-
-      input[type="range"]:hover {
-        opacity: 1;
-      }
+      button:hover { background-color: #45a049; }
+      button:disabled { background-color: #555; }
+      .fft-btn { background-color: #3498db; }
+      .fft-btn:hover { background-color: #2980b9; }
     </style>
   </head>
   <body>
-    <h1>ブラウザオシロスコープ＆スペクトルアナライザー</h1>
-    <canvas id="oscilloscopeCanvas" width="800" height="400"></canvas>
-    <canvas id="frequencyCanvas" width="800" height="200"></canvas>
+    <h1>LapSpec Analyzer</h1>
+    <canvas id="oscilloscopeCanvas" width="800" height="300"></canvas>
+    <canvas id="frequencyCanvas" width="800" height="300"></canvas>
+    
     <div class="controls">
-      <button id="startButton">マイクを有効にする</button>
-      <button id="stopButton" disabled>停止</button>
-      <button id="pauseResumeButton" disabled>一時停止</button>
-
       <div class="control-group">
-        <label for="inputGainControl">マイク感度(入力ゲイン):</label>
-        <input
-          type="range"
-          id="inputGainControl"
-          min="0.1"
-          max="20"
-          value="1"
-          step="0.1" />
-        <span id="inputGainValueDisplay">1.0</span>
+        <button id="startButton">マイク開始</button>
+        <button id="stopButton" disabled>停止</button>
+        <button id="pauseResumeButton" disabled>一時停止</button>
       </div>
 
       <div class="control-group">
-        <label for="displayGainControl"
-          >オシロスコープ垂直スケール（表示ゲイン）:</label
-        >
-        <input
-          type="range"
-          id="displayGainControl"
-          min="0.1"
-          max="5"
-          value="1"
-          step="0.1" />
-        <span id="displayGainValueDisplay">1.0</span>
+        <label>FFTサイズ:</label>
+        <button class="fft-btn" onclick="changeFftSize(2048)">2048</button>
+        <button class="fft-btn" onclick="changeFftSize(8192)">8192</button>
+        <button class="fft-btn" onclick="changeFftSize(16384)">16384</button>
       </div>
 
       <div class="control-group">
-        <label for="freqDisplayGainControl"
-          >スペクトル振幅スケール（周波数表示ゲイン）:</label
-        >
-        <input
-          type="range"
-          id="freqDisplayGainControl"
-          min="0.1"
-          max="10"
-          value="1"
-          step="0.1" />
-        <span id="freqDisplayGainValueDisplay">1.0</span>
+        <label>マイク感度:</label>
+        <input type="range" id="inputGainControl" min="0.1" max="10" value="1" step="0.1" />
+        <span class="val-disp" id="inputGainValueDisplay">1.0</span>
       </div>
-      <p>
-        設定>システム>サウンド>すべてのサウンドデバイス>プロパティ
-        からオーディオの強化をオフにしてください。
-      </p>
+
+      <div class="control-group">
+        <label>オシロ倍率:</label>
+        <input type="range" id="displayGainControl" min="0.1" max="5" value="1" step="0.1" />
+        <span class="val-disp" id="displayGainValueDisplay">1.0</span>
+      </div>
+
+      <div class="control-group">
+        <label>スペクトル倍率:</label>
+        <input type="range" id="freqDisplayGainControl" min="0.1" max="10" value="1" step="0.1" />
+        <span class="val-disp" id="freqDisplayGainValueDisplay">1.0</span>
+      </div>
     </div>
 
     <script>
       const oscilloscopeCanvas = document.getElementById("oscilloscopeCanvas");
-      const oscCtx = oscilloscopeCanvas.getContext("2d"); // オシロスコープ用コンテキスト
+      const oscCtx = oscilloscopeCanvas.getContext("2d");
       const frequencyCanvas = document.getElementById("frequencyCanvas");
-      const freqCtx = frequencyCanvas.getContext("2d"); // 周波数解析用コンテキスト
+      const freqCtx = frequencyCanvas.getContext("2d");
 
-      const startButton = document.getElementById("startButton");
-      const stopButton = document.getElementById("stopButton");
-      const pauseResumeButton = document.getElementById("pauseResumeButton");
+      let audioContext, analyser, inputGainNode, animationFrameId;
+      let frequencyDataArray, peakDataArray, peakVelocities;
+      let isPaused = false;
+      let inputGainValue = 1, displayGainValue = 1, freqDisplayGainValue = 1;
 
-      const inputGainControl = document.getElementById("inputGainControl");
-      const inputGainValueDisplay = document.getElementById(
-        "inputGainValueDisplay"
-      );
-      const displayGainControl = document.getElementById("displayGainControl");
-      const displayGainValueDisplay = document.getElementById(
-        "displayGainValueDisplay"
-      );
-      // 新しい周波数表示ゲインコントロールの参照
-      const freqDisplayGainControl = document.getElementById(
-        "freqDisplayGainControl"
-      );
-      const freqDisplayGainValueDisplay = document.getElementById(
-        "freqDisplayGainValueDisplay"
-      );
+      // ユーザーが追い込んだPD制御パラメータ
+      const Kp = 0.000002;
+      const Kd = 0.9999;
 
-      let audioContext;
-      let analyser;
-      let mediaStreamSource;
-      let inputGainNode; // 入力ゲイン用のGainNode
-      let animationFrameId;
-
-      let inputGainValue = parseFloat(inputGainControl.value);
-      let displayGainValue = parseFloat(displayGainControl.value);
-      let freqDisplayGainValue = parseFloat(freqDisplayGainControl.value); // 新しいゲイン値
-      let isPaused = false; // 一時停止状態を管理するフラグ
-
-      let frequencyDataArray; // 周波数データ格納用
-
-      // 初期ゲイン値を表示に反映
-      inputGainValueDisplay.textContent = inputGainValue.toFixed(1);
-      displayGainValueDisplay.textContent = displayGainValue.toFixed(1);
-      freqDisplayGainValueDisplay.textContent = freqDisplayGainValue.toFixed(1); // 新しいゲイン値の表示
-
-      // オシロスコープキャンバスのグリッドを描画する関数
+      // グリッド描画
       function drawOscilloscopeGrid() {
-        const width = oscilloscopeCanvas.width;
-        const height = oscilloscopeCanvas.height;
-        const gridSizeX = width / 10;
-        const gridSizeY = height / 8;
-
-        oscCtx.clearRect(0, 0, width, height);
-        oscCtx.fillStyle = "#000";
-        oscCtx.fillRect(0, 0, width, height);
-
+        const w = oscilloscopeCanvas.width, h = oscilloscopeCanvas.height;
+        oscCtx.fillStyle = "#000"; oscCtx.fillRect(0, 0, w, h);
         oscCtx.strokeStyle = "#333";
-        oscCtx.lineWidth = 1;
-
-        for (let i = 0; i <= 10; i++) {
-          oscCtx.beginPath();
-          oscCtx.moveTo(i * gridSizeX, 0);
-          oscCtx.lineTo(i * gridSizeX, height);
-          oscCtx.stroke();
-        }
-
-        for (let i = 0; i <= 8; i++) {
-          oscCtx.beginPath();
-          oscCtx.moveTo(0, i * gridSizeY);
-          oscCtx.lineTo(width, i * gridSizeY);
-          oscCtx.stroke();
-        }
-
+        for(let i=0; i<=10; i++){ oscCtx.beginPath(); oscCtx.moveTo(i*w/10, 0); oscCtx.lineTo(i*w/10, h); oscCtx.stroke(); }
+        for(let i=0; i<=8; i++){ oscCtx.beginPath(); oscCtx.moveTo(0, i*h/8); oscCtx.lineTo(w, i*h/8); oscCtx.stroke(); }
         oscCtx.strokeStyle = "#555";
-        oscCtx.beginPath();
-        oscCtx.moveTo(width / 2, 0);
-        oscCtx.lineTo(width / 2, height);
-        oscCtx.stroke();
-
-        oscCtx.beginPath();
-        oscCtx.moveTo(0, height / 2);
-        oscCtx.lineTo(width, height / 2);
-        oscCtx.stroke();
+        oscCtx.beginPath(); oscCtx.moveTo(0, h/2); oscCtx.lineTo(w, h/2); oscCtx.stroke();
       }
 
-      // 周波数キャンバスのグリッドとラベルを描画する関数
       function drawFrequencyGrid() {
-        const width = frequencyCanvas.width;
-        const height = frequencyCanvas.height;
-        const gridSizeX = width / 10; // 10分割 (目安)
-        const gridSizeY = height / 4; // 4分割
-
-        freqCtx.clearRect(0, 0, width, height);
-        freqCtx.fillStyle = "#000";
-        freqCtx.fillRect(0, 0, width, height);
-
+        const w = frequencyCanvas.width, h = frequencyCanvas.height;
+        freqCtx.fillStyle = "#000"; freqCtx.fillRect(0, 0, w, h);
         freqCtx.strokeStyle = "#333";
-        freqCtx.lineWidth = 1;
-
-        // 線形の縦線グリッド（目安として残す）
-        for (let i = 0; i <= 10; i++) {
-          freqCtx.beginPath();
-          freqCtx.moveTo(i * gridSizeX, 0);
-          freqCtx.lineTo(i * gridSizeX, height);
-          freqCtx.stroke();
-        }
-
-        // 横線（振幅レベル）
-        for (let i = 0; i <= 4; i++) {
-          freqCtx.beginPath();
-          freqCtx.moveTo(0, i * gridSizeY);
-          freqCtx.lineTo(width, i * gridSizeY);
-          freqCtx.stroke();
-        }
-
-        // 周波数ラベルの描画 (対数目盛)
-        if (audioContext && analyser) {
-          const sampleRate = audioContext.sampleRate;
-          const maxDisplayFreq = sampleRate / 2; // ナイキスト周波数
-          const minDisplayFreq = 20; // 対数目盛の開始周波数 (0Hzは不可)
-
-          // 対数計算のための範囲を定義
-          const logMinFreq = Math.log10(minDisplayFreq);
-          const logMaxFreq = Math.log10(maxDisplayFreq);
-          const logRange = logMaxFreq - logMinFreq;
-
-          freqCtx.fillStyle = "#EEE"; // ラベルの色
-          freqCtx.font = "10px Arial";
-          freqCtx.textAlign = "center";
-          freqCtx.textBaseline = "bottom"; // テキストは基準線の上
-
-          // 対数目盛に適した周波数ラベルのポイント
-          const frequenciesToLabel = [
-            20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000,
-          ];
-
-          frequenciesToLabel.forEach((freq) => {
-            if (freq >= minDisplayFreq && freq <= maxDisplayFreq) {
-              const logFreq = Math.log10(freq);
-              // 対数スケールでのX座標を計算
-              const x = width * ((logFreq - logMinFreq) / logRange);
-
-              // 目盛線を描画
-              freqCtx.strokeStyle = "#555";
-              freqCtx.beginPath();
-              freqCtx.moveTo(x, 0);
-              freqCtx.lineTo(x, height);
-              freqCtx.stroke();
-
-              // テキストラベルを描画
-              let labelText = "";
-              if (freq >= 1000) {
-                labelText = `${freq / 1000}kHz`;
-              } else {
-                labelText = `${freq}Hz`;
-              }
-              freqCtx.fillText(labelText, x, height - 5); // 下から5pxの位置に描画
+        for(let i=0; i<=10; i++){ freqCtx.beginPath(); freqCtx.moveTo(i*w/10, 0); freqCtx.lineTo(i*w/10, h); freqCtx.stroke(); }
+        if (audioContext) {
+          const sampleRate = audioContext.sampleRate, logMin = Math.log10(20), logMax = Math.log10(sampleRate/2), logRange = logMax - logMin;
+          const labels = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+          freqCtx.fillStyle = "#999"; freqCtx.font = "10px Arial";
+          labels.forEach(f => {
+            const x = w * (Math.log10(f) - logMin) / logRange;
+            if(x >= 0 && x <= w){
+              freqCtx.strokeStyle = "#555"; freqCtx.beginPath(); freqCtx.moveTo(x, 0); freqCtx.lineTo(x, h); freqCtx.stroke();
+              freqCtx.fillText(f >= 1000 ? (f/1000)+"k" : f, x + 2, h - 5);
             }
           });
         }
       }
 
-      // オシロスコープの波形を描画する関数
-      function drawOscilloscopeWaveform() {
-        const bufferLength = analyser.fftSize;
-        const dataArray = new Uint8Array(bufferLength);
-        analyser.getByteTimeDomainData(dataArray);
-
-        drawOscilloscopeGrid(); // グリッドを再描画
-
-        oscCtx.lineWidth = 2;
-        oscCtx.strokeStyle = "#00FF00";
-        oscCtx.beginPath();
-
-        const sliceWidth = (oscilloscopeCanvas.width * 1.0) / bufferLength;
-        let x = 0;
-
-        for (let i = 0; i < bufferLength; i++) {
-          const v = dataArray[i] / 128.0 - 1.0;
-          const y =
-            oscilloscopeCanvas.height / 2 +
-            v * (oscilloscopeCanvas.height / 2) * displayGainValue;
-
-          if (i === 0) {
-            oscCtx.moveTo(x, y);
-          } else {
-            oscCtx.lineTo(x, y);
-          }
-
-          x += sliceWidth;
-        }
-
-        oscCtx.lineTo(oscilloscopeCanvas.width, oscilloscopeCanvas.height / 2);
-        oscCtx.stroke();
+      function changeFftSize(size) {
+        if (!analyser) return;
+        analyser.fftSize = size;
+        const count = analyser.frequencyBinCount;
+        frequencyDataArray = new Uint8Array(count);
+        peakDataArray = new Float32Array(count).fill(0);
+        peakVelocities = new Float32Array(count).fill(0);
+        console.log("FFT size changed to:", size);
       }
 
-      // 周波数スペクトルを描画する関数 (対数目盛)
-      function drawFrequencySpectrum() {
-        if (!audioContext || !analyser) return; // コンテキストが準備できていない場合は描画しない
-
-        analyser.getByteFrequencyData(frequencyDataArray);
-        // console.log("Debug: Frequency data fetched. First 5 bins:", frequencyDataArray.slice(0, 5)); // デバッグポイント
-
-        drawFrequencyGrid(); // グリッドとラベルを再描画
-
-        freqCtx.lineWidth = 1; // スペクトル線の太さ
-        freqCtx.strokeStyle = "#00FF00"; // スペクトル線の色
-
-        const sampleRate = audioContext.sampleRate;
-        const maxDisplayFreq = sampleRate / 2; // ナイキスト周波数
-        const minDisplayFreq = 20; // 対数目盛の開始周波数
-
-        const logMinFreq = Math.log10(minDisplayFreq);
-        const logMaxFreq = Math.log10(maxDisplayFreq);
-        const logRange = logMaxFreq - logMinFreq;
-
-        const freqPerBin = maxDisplayFreq / analyser.frequencyBinCount; // 1ビンあたりの周波数幅
-
-        freqCtx.beginPath();
-        let firstPoint = true;
-
-        // キャンバスの各Xピクセルに対して周波数を計算し、対応するビンからデータを取得
-        for (let x = 0; x < frequencyCanvas.width; x++) {
-          // X座標から対数スケールでの周波数を計算
-          const logFreqAtX =
-            logMinFreq + (x / frequencyCanvas.width) * logRange;
-          const freqAtX = Math.pow(10, logFreqAtX);
-
-          // その周波数に対応するビンインデックスを計算
-          const binIndex = Math.floor(freqAtX / freqPerBin);
-
-          let value;
-          // ビンインデックスが範囲内であることを確認
-          if (binIndex < 0 || binIndex >= analyser.frequencyBinCount) {
-            value = 0; // 範囲外はデータなしとして0を設定
-          } else {
-            value = frequencyDataArray[binIndex]; // データ取得
-          }
-
-          // 高さ計算（表示ゲインを適用）
-          const barHeight =
-            (value / 255) * frequencyCanvas.height * freqDisplayGainValue;
-          const y = frequencyCanvas.height - barHeight; // 底部から描画
-
-          if (firstPoint) {
-            freqCtx.moveTo(x, y); // 最初のポイント
-            firstPoint = false;
-          } else {
-            freqCtx.lineTo(x, y); // その後のポイントは線で繋ぐ
-          }
+      function updatePeakPhysics() {
+        if (!peakDataArray) return;
+        for (let i = 0; i < peakDataArray.length; i++) {
+          const error = 0 - peakDataArray[i];
+          const acceleration = error * Kp;
+          peakVelocities[i] += acceleration;
+          peakVelocities[i] *= Kd;
+          peakDataArray[i] += peakVelocities[i];
+          if (peakDataArray[i] < 0) { peakDataArray[i] = 0; peakVelocities[i] = 0; }
         }
-        freqCtx.stroke(); // 全ての線をまとめて描画
       }
 
-      // 全体の描画ループ
       function draw() {
-        if (!isPaused) {
-          animationFrameId = requestAnimationFrame(draw);
-        } else {
-          return;
-        }
+        if (!isPaused) animationFrameId = requestAnimationFrame(draw);
 
-        console.log("Debug: Main draw loop active."); // デバッグポイント
-
-        drawOscilloscopeWaveform(); // オシロスコープ波形を描画
-        drawFrequencySpectrum(); // 周波数スペクトルを描画
-      }
-
-      // マイクアクセスを開始する関数
-      async function startMic() {
-        try {
-          audioContext = new (window.AudioContext ||
-            window.webkitAudioContext)();
-          analyser = audioContext.createAnalyser();
-          inputGainNode = audioContext.createGain();
-
-          analyser.fftSize = 2048;
-          // AnalyserNodeのデシベル範囲を調整
-          analyser.minDecibels = -120; // デフォルト-100dBから引き下げ
-          analyser.maxDecibels = -10; // デフォルト-30dBから引き上げ
-          console.log(
-            `Debug: AnalyserNode decibel range set to min: ${analyser.minDecibels}dB, max: ${analyser.maxDecibels}dB.`
-          ); // デバッグポイント
-
-          frequencyDataArray = new Uint8Array(analyser.frequencyBinCount); // ここで初期化
-          console.log(
-            "Debug: AnalyserNode created, frequencyBinCount:",
-            analyser.frequencyBinCount
-          ); // デバッグポイント
-
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-          });
-          mediaStreamSource = audioContext.createMediaStreamSource(stream);
-
-          mediaStreamSource.connect(inputGainNode);
-          inputGainNode.connect(analyser);
-
-          inputGainNode.gain.value = inputGainValue;
-          console.log("Debug: Initial Input Gain set to:", inputGainValue); // デバッグポイント
-
-          startButton.disabled = true;
-          stopButton.disabled = false;
-          pauseResumeButton.disabled = false;
-          pauseResumeButton.textContent = "一時停止";
-          isPaused = false;
-
-          draw();
-        } catch (err) {
-          console.error("Debug: マイクへのアクセスに失敗しました:", err); // デバッグポイント
-          alert(
-            "マイクへのアクセス許可が必要です。ブラウザの設定を確認してください。"
-          );
-          startButton.disabled = false;
-          stopButton.disabled = true;
-          pauseResumeButton.disabled = true;
-        }
-      }
-
-      // マイクアクセスを停止する関数
-      function stopMic() {
-        if (animationFrameId) {
-          cancelAnimationFrame(animationFrameId);
-        }
-        if (mediaStreamSource) {
-          mediaStreamSource.disconnect();
-          if (inputGainNode) {
-            inputGainNode.disconnect();
-          }
-          mediaStreamSource.mediaStream
-            .getTracks()
-            .forEach((track) => track.stop());
-          mediaStreamSource = null;
-          inputGainNode = null;
-        }
-        if (audioContext) {
-          audioContext.close();
-          audioContext = null;
-        }
-
-        startButton.disabled = false;
-        stopButton.disabled = true;
-        pauseResumeButton.disabled = true;
-        pauseResumeButton.textContent = "一時停止";
-        isPaused = false;
-        drawOscilloscopeGrid(); // オシロスコープグリッドのみ表示
-        drawFrequencyGrid(); // 周波数グリッドのみ表示
-        console.log("Debug: Microphone stopped and canvases cleared."); // デバッグポイント
-      }
-
-      // 入力ゲインコントロールのスライダーイベントリスナー
-      inputGainControl.addEventListener("input", (event) => {
-        inputGainValue = parseFloat(event.target.value);
-        inputGainValueDisplay.textContent = inputGainValue.toFixed(1);
-        if (inputGainNode) {
-          inputGainNode.gain.value = inputGainValue;
-        }
-        console.log("Debug: Input Gain changed to:", inputGainValue); // デバッグポイント
-      });
-
-      // 表示ゲインコントロールのスライダーイベントリスナー
-      displayGainControl.addEventListener("input", (event) => {
-        displayGainValue = parseFloat(event.target.value);
-        displayGainValueDisplay.textContent = displayGainValue.toFixed(1);
-        console.log("Debug: Display Gain changed to:", displayGainValue); // デバッグポイント
-      });
-
-      // 周波数表示ゲインコントロールのスライダーイベントリスナー
-      freqDisplayGainControl.addEventListener("input", (event) => {
-        freqDisplayGainValue = parseFloat(event.target.value);
-        freqDisplayGainValueDisplay.textContent =
-          freqDisplayGainValue.toFixed(1);
-        console.log(
-          "Debug: Frequency Display Gain changed to:",
-          freqDisplayGainValue
-        ); // デバッグポイント
-      });
-
-      // 一時停止・再開ボタンのイベントリスナー
-      pauseResumeButton.addEventListener("click", () => {
-        if (!audioContext || !analyser) {
-          return;
-        }
-
-        if (isPaused) {
-          isPaused = false;
-          pauseResumeButton.textContent = "一時停止";
-          draw();
-          console.log("Debug: Resumed drawing."); // デバッグポイント
-        } else {
-          isPaused = true;
-          pauseResumeButton.textContent = "再開";
-          console.log("Debug: Paused drawing."); // デバッグポイント
-        }
-      });
-
-      // ボタンのイベントリスナー
-      startButton.addEventListener("click", startMic);
-      stopButton.addEventListener("click", stopMic);
-
-      // ページロード時に両方のグリッドを一度描画
-      window.addEventListener("load", () => {
+        // --- オシロスコープ ---
+        const timeData = new Uint8Array(analyser.fftSize);
+        analyser.getByteTimeDomainData(timeData);
         drawOscilloscopeGrid();
+        oscCtx.lineWidth = 1.5; oscCtx.strokeStyle = "#00FF00";
+        oscCtx.beginPath();
+        let sliceWidth = oscilloscopeCanvas.width / analyser.fftSize;
+        for(let i=0, x=0; i < analyser.fftSize; i++, x += sliceWidth){
+          const v = (timeData[i] / 128.0 - 1.0) * displayGainValue;
+          const y = oscilloscopeCanvas.height / 2 + v * (oscilloscopeCanvas.height / 2);
+          i === 0 ? oscCtx.moveTo(x, y) : oscCtx.lineTo(x, y);
+        }
+        oscCtx.stroke();
+
+        // --- スペクトル ---
+        analyser.getByteFrequencyData(frequencyDataArray);
+        updatePeakPhysics();
         drawFrequencyGrid();
-      });
+
+        const w = frequencyCanvas.width, h = frequencyCanvas.height;
+        const sampleRate = audioContext.sampleRate;
+        const logMin = Math.log10(20), logMax = Math.log10(sampleRate/2), logRange = logMax - logMin;
+        const freqPerBin = (sampleRate/2) / analyser.frequencyBinCount;
+
+        // リアルタイム波形(緑)
+        freqCtx.beginPath();
+        freqCtx.strokeStyle = "#00FF00";
+        for (let x = 0; x < w; x++) {
+          const f = Math.pow(10, logMin + (x / w) * logRange);
+          const fNext = Math.pow(10, logMin + ((x + 1) / w) * logRange);
+          const binSpan = (fNext - f) / freqPerBin;
+
+          let val = 0;
+          if (binSpan < 1) {
+            // 【低域ガバガバ対策】1ピクセルが1ビンより狭い時は単一ビン参照
+            const binIdx = Math.floor(f / freqPerBin);
+            val = frequencyDataArray[binIdx] || 0;
+          } else {
+            // 【高域】範囲内の最大値を参照
+            const bStart = Math.floor(f / freqPerBin), bEnd = Math.ceil(fNext / freqPerBin);
+            for(let b = bStart; b <= bEnd; b++) {
+              if(frequencyDataArray[b] > val) val = frequencyDataArray[b];
+            }
+          }
+
+          // ピーク更新 (ピンポイントのビンを叩く)
+          const bIdx = Math.floor(f / freqPerBin);
+          if (bIdx < peakDataArray.length && val > peakDataArray[bIdx]) {
+            peakDataArray[bIdx] = val;
+            peakVelocities[bIdx] = 0;
+          }
+
+          const y = h - (val / 255) * h * freqDisplayGainValue;
+          x === 0 ? freqCtx.moveTo(x, y) : freqCtx.lineTo(x, y);
+        }
+        freqCtx.stroke();
+
+        // ピークドット描画(オレンジ)
+        freqCtx.beginPath();
+        freqCtx.strokeStyle = "rgba(255, 152, 0, 0.8)";
+        for (let x = 0; x < w; x++) {
+          const f = Math.pow(10, logMin + (x / w) * logRange);
+          const fNext = Math.pow(10, logMin + ((x + 1) / w) * logRange);
+          const binSpan = (fNext - f) / freqPerBin;
+          let pVal = 0;
+          if (binSpan < 1) {
+            pVal = peakDataArray[Math.floor(f / freqPerBin)] || 0;
+          } else {
+            const bStart = Math.floor(f / freqPerBin), bEnd = Math.ceil(fNext / freqPerBin);
+            for(let b = bStart; b <= bEnd; b++) { if(peakDataArray[b] > pVal) pVal = peakDataArray[b]; }
+          }
+          const py = h - (pVal / 255) * h * freqDisplayGainValue;
+          x === 0 ? freqCtx.moveTo(x, py) : freqCtx.lineTo(x, py);
+        }
+        freqCtx.stroke();
+      }
+
+      async function startMic() {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        inputGainNode = audioContext.createGain();
+        changeFftSize(2048);
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext.createMediaStreamSource(stream).connect(inputGainNode);
+        inputGainNode.connect(analyser);
+        inputGainNode.gain.value = inputGainValue;
+        document.getElementById("startButton").disabled = true;
+        document.getElementById("stopButton").disabled = false;
+        document.getElementById("pauseResumeButton").disabled = false;
+        isPaused = false; draw();
+      }
+
+      function stopMic() {
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+        if (audioContext) audioContext.close();
+        document.getElementById("startButton").disabled = false;
+        document.getElementById("stopButton").disabled = true;
+        document.getElementById("pauseResumeButton").disabled = true;
+        drawOscilloscopeGrid(); drawFrequencyGrid();
+      }
+
+      // スライダー類
+      document.getElementById("inputGainControl").oninput = e => {
+        inputGainValue = parseFloat(e.target.value);
+        document.getElementById("inputGainValueDisplay").textContent = inputGainValue.toFixed(1);
+        if (inputGainNode) inputGainNode.gain.value = inputGainValue;
+      };
+      document.getElementById("displayGainControl").oninput = e => {
+        displayGainValue = parseFloat(e.target.value);
+        document.getElementById("displayGainValueDisplay").textContent = displayGainValue.toFixed(1);
+      };
+      document.getElementById("freqDisplayGainControl").oninput = e => {
+        freqDisplayGainValue = parseFloat(e.target.value);
+        document.getElementById("freqDisplayGainValueDisplay").textContent = freqDisplayGainValue.toFixed(1);
+      };
+      document.getElementById("pauseResumeButton").onclick = () => {
+        isPaused = !isPaused;
+        document.getElementById("pauseResumeButton").textContent = isPaused ? "再開" : "一時停止";
+        if (!isPaused) draw();
+      };
+      document.getElementById("startButton").onclick = startMic;
+      document.getElementById("stopButton").onclick = stopMic;
+      window.onload = () => { drawOscilloscopeGrid(); drawFrequencyGrid(); };
     </script>
   </body>
 </html>
