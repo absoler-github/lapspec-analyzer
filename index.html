@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LapSpec Analyzer - Professional Edition</title>
     <style>
+      /* 基本レイアウト設定 */
       body {
         display: flex;
         flex-direction: column;
@@ -23,6 +24,7 @@
         display: block;
         margin-top: 5px;
       }
+      /* 操作パネルのスタイル */
       .controls {
         margin-top: 15px;
         display: flex;
@@ -57,6 +59,8 @@
       button:disabled { background-color: #555; }
       .fft-btn { background-color: #3498db; }
       .fft-btn:hover { background-color: #2980b9; }
+      .toggle-btn { background-color: #e67e22; }
+      .toggle-btn.off { background-color: #7f8c8d; }
     </style>
   </head>
   <body>
@@ -69,6 +73,11 @@
         <button id="startButton">マイク開始</button>
         <button id="stopButton" disabled>停止</button>
         <button id="pauseResumeButton" disabled>一時停止</button>
+      </div>
+
+      <div class="control-group">
+        <label>表示設定:</label>
+        <button id="togglePointsButton" class="toggle-btn">赤点: ON</button>
       </div>
 
       <div class="control-group">
@@ -98,6 +107,9 @@
     </div>
 
     <script>
+      /**
+       * グローバル変数定義
+       */
       const oscilloscopeCanvas = document.getElementById("oscilloscopeCanvas");
       const oscCtx = oscilloscopeCanvas.getContext("2d");
       const frequencyCanvas = document.getElementById("frequencyCanvas");
@@ -106,13 +118,66 @@
       let audioContext, analyser, inputGainNode, animationFrameId;
       let frequencyDataArray, peakDataArray, peakVelocities;
       let isPaused = false;
+      let showPoints = true; // 赤色の制御点を描画するかどうかのフラグ
       let inputGainValue = 1, displayGainValue = 1, freqDisplayGainValue = 1;
 
-      // ユーザーが追い込んだPD制御パラメータ
-      const Kp = 0.000002;
-      const Kd = 0.9999;
+      // ピークドットの物理挙動パラメータ (PD制御風)
+      const Kp = 0.000002; // 引力係数
+      const Kd = 0.9999;   // 減衰係数
 
-      // グリッド描画
+      /**
+       * 3次スプライン補間関数を生成する
+       * @param {Array} points - {x, y} 座標の配列
+       * @returns {Function} x を引数に y を返す補間関数
+       */
+      function getSplineFunction(points) {
+        const n = points.length - 1;
+        if (n < 2) return (x) => points[0]?.y || 0;
+
+        const h = new Array(n);
+        for (let i = 0; i < n; i++) h[i] = points[i+1].x - points[i].x;
+
+        const a = new Array(n + 1);
+        for (let i = 0; i <= n; i++) a[i] = points[i].y;
+
+        const alpha = new Array(n);
+        for (let i = 1; i < n; i++) alpha[i] = (3/h[i])*(a[i+1] - a[i]) - (3/h[i-1])*(a[i] - a[i-1]);
+
+        const l = new Array(n + 1), mu = new Array(n + 1), z = new Array(n + 1);
+        l[0] = 1; mu[0] = 0; z[0] = 0;
+
+        // 三対角行列の解法 (前向き消去)
+        for (let i = 1; i < n; i++) {
+          l[i] = 2 * (points[i+1].x - points[i-1].x) - h[i-1] * mu[i-1];
+          mu[i] = h[i] / l[i];
+          z[i] = (alpha[i] - h[i-1] * z[i-1]) / l[i];
+        }
+
+        l[n] = 1; z[n] = 0;
+        const b = new Array(n), c = new Array(n + 1), d = new Array(n);
+        c[n] = 0;
+
+        // 後退代入
+        for (let j = n - 1; j >= 0; j--) {
+          c[j] = z[j] - mu[j] * c[j+1];
+          b[j] = (a[j+1] - a[j]) / h[j] - h[j] * (c[j+1] + 2 * c[j]) / 3;
+          d[j] = (c[j+1] - c[j]) / (3 * h[j]);
+        }
+
+        // 補間計算を実行するクロージャを返す
+        return (x) => {
+          let i = points.findIndex((p, idx) => x >= p.x && x <= (points[idx+1]?.x || Infinity));
+          if (i === -1) i = x < points[0].x ? 0 : n - 1;
+          if (i >= n) i = n - 1;
+          const dx = x - points[i].x;
+          // S_i(x) = a_i + b_i(x-x_i) + c_i(x-x_i)^2 + d_i(x-x_i)^3
+          return a[i] + b[i] * dx + c[i] * Math.pow(dx, 2) + d[i] * Math.pow(dx, 3);
+        };
+      }
+
+      /**
+       * オシロスコープの背景グリッド描画
+       */
       function drawOscilloscopeGrid() {
         const w = oscilloscopeCanvas.width, h = oscilloscopeCanvas.height;
         oscCtx.fillStyle = "#000"; oscCtx.fillRect(0, 0, w, h);
@@ -123,11 +188,16 @@
         oscCtx.beginPath(); oscCtx.moveTo(0, h/2); oscCtx.lineTo(w, h/2); oscCtx.stroke();
       }
 
+      /**
+       * スペクトル解析の背景グリッド（対数軸ラベル）描画
+       */
       function drawFrequencyGrid() {
         const w = frequencyCanvas.width, h = frequencyCanvas.height;
         freqCtx.fillStyle = "#000"; freqCtx.fillRect(0, 0, w, h);
         freqCtx.strokeStyle = "#333";
+        // 縦線
         for(let i=0; i<=10; i++){ freqCtx.beginPath(); freqCtx.moveTo(i*w/10, 0); freqCtx.lineTo(i*w/10, h); freqCtx.stroke(); }
+        
         if (audioContext) {
           const sampleRate = audioContext.sampleRate, logMin = Math.log10(20), logMax = Math.log10(sampleRate/2), logRange = logMax - logMin;
           const labels = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
@@ -142,6 +212,9 @@
         }
       }
 
+      /**
+       * FFTサイズの変更と配列の初期化
+       */
       function changeFftSize(size) {
         if (!analyser) return;
         analyser.fftSize = size;
@@ -149,13 +222,15 @@
         frequencyDataArray = new Uint8Array(count);
         peakDataArray = new Float32Array(count).fill(0);
         peakVelocities = new Float32Array(count).fill(0);
-        console.log("FFT size changed to:", size);
       }
 
+      /**
+       * オレンジ色のピークラインの物理挙動計算
+       */
       function updatePeakPhysics() {
         if (!peakDataArray) return;
         for (let i = 0; i < peakDataArray.length; i++) {
-          const error = 0 - peakDataArray[i];
+          const error = 0 - peakDataArray[i]; // 常に0（底）へ向かう力
           const acceleration = error * Kp;
           peakVelocities[i] += acceleration;
           peakVelocities[i] *= Kd;
@@ -164,10 +239,13 @@
         }
       }
 
+      /**
+       * メイン描画ループ
+       */
       function draw() {
         if (!isPaused) animationFrameId = requestAnimationFrame(draw);
 
-        // --- オシロスコープ ---
+        // 1. オシロスコープ描画
         const timeData = new Uint8Array(analyser.fftSize);
         analyser.getByteTimeDomainData(timeData);
         drawOscilloscopeGrid();
@@ -181,7 +259,7 @@
         }
         oscCtx.stroke();
 
-        // --- スペクトル ---
+        // 2. スペクトルデータ準備
         analyser.getByteFrequencyData(frequencyDataArray);
         updatePeakPhysics();
         drawFrequencyGrid();
@@ -191,74 +269,112 @@
         const logMin = Math.log10(20), logMax = Math.log10(sampleRate/2), logRange = logMax - logMin;
         const freqPerBin = (sampleRate/2) / analyser.frequencyBinCount;
 
-        // リアルタイム波形(緑)
-        freqCtx.beginPath();
-        freqCtx.strokeStyle = "#00FF00";
+        const controlPoints = [];
+
+        // 3. 制御点の抽出（各ピクセル位置における支配的なビンを特定）
         for (let x = 0; x < w; x++) {
           const f = Math.pow(10, logMin + (x / w) * logRange);
           const fNext = Math.pow(10, logMin + ((x + 1) / w) * logRange);
-          const binSpan = (fNext - f) / freqPerBin;
+          const bStart = Math.ceil(f / freqPerBin);
+          const bEnd = Math.floor(fNext / freqPerBin);
 
           let val = 0;
-          if (binSpan < 1) {
-            // 【低域ガバガバ対策】1ピクセルが1ビンより狭い時は単一ビン参照
-            const binIdx = Math.floor(f / freqPerBin);
-            val = frequencyDataArray[binIdx] || 0;
-          } else {
-            // 【高域】範囲内の最大値を参照
-            const bStart = Math.floor(f / freqPerBin), bEnd = Math.ceil(fNext / freqPerBin);
-            for(let b = bStart; b <= bEnd; b++) {
-              if(frequencyDataArray[b] > val) val = frequencyDataArray[b];
+          let hasBin = false;
+
+          // 高域など、1ピクセル内に複数のビンが含まれる場合（最大値を取る）
+          if (bStart <= bEnd) {
+            for (let b = bStart; b <= bEnd; b++) {
+              if (frequencyDataArray[b] > val) val = frequencyDataArray[b];
+              hasBin = true;
             }
+          } else {
+            // 低域など、1ビンが複数ピクセルに跨る場合
+            const bIdx = Math.floor(f / freqPerBin);
+            val = frequencyDataArray[bIdx] || 0;
+            const prevF = Math.pow(10, logMin + ((x - 1) / w) * logRange);
+            // ビンの変わり目のみを点として抽出（描画負荷軽減と精度維持）
+            if (Math.floor(prevF / freqPerBin) !== bIdx) hasBin = true;
           }
 
-          // ピーク更新 (ピンポイントのビンを叩く)
+          if (hasBin) {
+            const y = h - (val / 255) * h * freqDisplayGainValue;
+            controlPoints.push({ x: x, y: y });
+          }
+
+          // ピークデータの更新（物理演算用）
           const bIdx = Math.floor(f / freqPerBin);
           if (bIdx < peakDataArray.length && val > peakDataArray[bIdx]) {
             peakDataArray[bIdx] = val;
             peakVelocities[bIdx] = 0;
           }
-
-          const y = h - (val / 255) * h * freqDisplayGainValue;
-          x === 0 ? freqCtx.moveTo(x, y) : freqCtx.lineTo(x, y);
         }
-        freqCtx.stroke();
 
-        // ピークドット描画(オレンジ)
+        // 4. 緑色の3次スプライン補間線の描画
+        if (controlPoints.length > 2) {
+          const spline = getSplineFunction(controlPoints);
+          freqCtx.beginPath();
+          freqCtx.strokeStyle = "#00FF00";
+          freqCtx.lineWidth = 1.5;
+          for (let x = controlPoints[0].x; x <= controlPoints[controlPoints.length - 1].x; x++) {
+            const y = spline(x);
+            x === controlPoints[0].x ? freqCtx.moveTo(x, y) : freqCtx.lineTo(x, y);
+          }
+          freqCtx.stroke();
+        }
+
+        // 5. 赤い点（制御点）の描画（トグルON時のみ）
+        if (showPoints) {
+          freqCtx.fillStyle = "#FF4444";
+          controlPoints.forEach(p => {
+            freqCtx.fillRect(p.x - 1, p.y - 1, 2, 2);
+          });
+        }
+
+        // 6. オレンジ色のピーク保持ライン描画
         freqCtx.beginPath();
-        freqCtx.strokeStyle = "rgba(255, 152, 0, 0.8)";
+        freqCtx.strokeStyle = "rgba(255, 152, 0, 0.4)";
+        freqCtx.lineWidth = 1;
         for (let x = 0; x < w; x++) {
           const f = Math.pow(10, logMin + (x / w) * logRange);
           const fNext = Math.pow(10, logMin + ((x + 1) / w) * logRange);
-          const binSpan = (fNext - f) / freqPerBin;
+          const bStart = Math.floor(f / freqPerBin), bEnd = Math.ceil(fNext / freqPerBin);
           let pVal = 0;
-          if (binSpan < 1) {
-            pVal = peakDataArray[Math.floor(f / freqPerBin)] || 0;
-          } else {
-            const bStart = Math.floor(f / freqPerBin), bEnd = Math.ceil(fNext / freqPerBin);
-            for(let b = bStart; b <= bEnd; b++) { if(peakDataArray[b] > pVal) pVal = peakDataArray[b]; }
-          }
+          for(let b = bStart; b <= bEnd; b++) { if(peakDataArray[b] > pVal) pVal = peakDataArray[b]; }
           const py = h - (pVal / 255) * h * freqDisplayGainValue;
           x === 0 ? freqCtx.moveTo(x, py) : freqCtx.lineTo(x, py);
         }
         freqCtx.stroke();
       }
 
+      /**
+       * マイクの使用開始
+       */
       async function startMic() {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         analyser = audioContext.createAnalyser();
         inputGainNode = audioContext.createGain();
         changeFftSize(2048);
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioContext.createMediaStreamSource(stream).connect(inputGainNode);
-        inputGainNode.connect(analyser);
-        inputGainNode.gain.value = inputGainValue;
-        document.getElementById("startButton").disabled = true;
-        document.getElementById("stopButton").disabled = false;
-        document.getElementById("pauseResumeButton").disabled = false;
-        isPaused = false; draw();
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          audioContext.createMediaStreamSource(stream).connect(inputGainNode);
+          inputGainNode.connect(analyser);
+          inputGainNode.gain.value = inputGainValue;
+          
+          // UIの状態更新
+          document.getElementById("startButton").disabled = true;
+          document.getElementById("stopButton").disabled = false;
+          document.getElementById("pauseResumeButton").disabled = false;
+          isPaused = false; 
+          draw();
+        } catch (err) {
+          console.error("マイクのアクセスに失敗しました:", err);
+          alert("マイクへのアクセスを許可してください。");
+        }
       }
 
+      /**
+       * マイクの停止
+       */
       function stopMic() {
         if (animationFrameId) cancelAnimationFrame(animationFrameId);
         if (audioContext) audioContext.close();
@@ -268,7 +384,19 @@
         drawOscilloscopeGrid(); drawFrequencyGrid();
       }
 
-      // スライダー類
+      /**
+       * イベントリスナー設定
+       */
+      
+      // 赤点表示切り替えトグル
+      document.getElementById("togglePointsButton").onclick = (e) => {
+        showPoints = !showPoints;
+        const btn = e.target;
+        btn.textContent = `赤点: ${showPoints ? 'ON' : 'OFF'}`;
+        showPoints ? btn.classList.remove('off') : btn.classList.add('off');
+      };
+
+      // 感度・倍率スライダー
       document.getElementById("inputGainControl").oninput = e => {
         inputGainValue = parseFloat(e.target.value);
         document.getElementById("inputGainValueDisplay").textContent = inputGainValue.toFixed(1);
@@ -282,13 +410,18 @@
         freqDisplayGainValue = parseFloat(e.target.value);
         document.getElementById("freqDisplayGainValueDisplay").textContent = freqDisplayGainValue.toFixed(1);
       };
+
+      // 一時停止・再開
       document.getElementById("pauseResumeButton").onclick = () => {
         isPaused = !isPaused;
         document.getElementById("pauseResumeButton").textContent = isPaused ? "再開" : "一時停止";
         if (!isPaused) draw();
       };
+
       document.getElementById("startButton").onclick = startMic;
       document.getElementById("stopButton").onclick = stopMic;
+
+      // 初回起動時の描画
       window.onload = () => { drawOscilloscopeGrid(); drawFrequencyGrid(); };
     </script>
   </body>
